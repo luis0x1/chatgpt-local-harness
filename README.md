@@ -1,12 +1,13 @@
 # Local Coding Harness for ChatGPT Work
 
-A local, stdio MCP server that lets ChatGPT Work inspect, search, patch, diff, build, lint, and test code inside explicitly allowed workspace roots, with an optional read-only local memory boundary. Secure MCP Tunnel connects the local process without exposing a public port.
+A local MCP server that lets ChatGPT Work inspect, search, patch, diff, build, lint, and test code inside explicitly allowed workspace roots, with an optional read-only local memory boundary. It can run over stdio for local/tunneled use or over authenticated Streamable HTTP when you want to place it behind a public HTTPS reverse proxy such as Tailscale Funnel.
 
 ## Requirements
 
 - Node.js 20 or newer
 - Git and (recommended) ripgrep (`rg`)
 - A ChatGPT Work workspace with Developer mode and Secure MCP Tunnel access
+- Tailscale CLI only if you want to use the optional Funnel deployment described below
 - Windows PowerShell, or a POSIX shell on Linux/macOS
 
 ## Install and build
@@ -81,6 +82,124 @@ The configured user-defined client coexists with Dynamic Client Registration. DC
 The harness acts as the OAuth authorization server for MCP clients. Google is used only to verify the end user's identity. A verified Google email must exactly match the case-insensitive whitelist before the harness approves the authorization request. The harness then issues its own one-hour access token and rotating refresh token; Google access tokens are not returned to MCP clients.
 
 OAuth client registrations, authorization state, access tokens, and refresh tokens are held in memory and are invalidated when the harness restarts. The `/mcp` endpoint requires a valid bearer token while OAuth discovery, registration, authorization, token, revocation, and Google callback endpoints remain reachable as required by the OAuth flow.
+
+### Connect ChatGPT through Tailscale Funnel
+
+Tailscale Funnel can expose the authenticated HTTP mode to the public internet while the harness itself continues to listen only on loopback. The examples in this section intentionally use placeholders; do not copy another person's Funnel hostname.
+
+This deployment shape has been tested with a path-mounted public harness URL plus a separate Google callback mount:
+
+Before starting, make sure Funnel is enabled for the tailnet. Current Tailscale documentation requires MagicDNS, HTTPS/certificates, and Funnel permission for the node; Funnel public listeners are limited to supported HTTPS ports such as `443`, `8443`, and `10000`. The examples below use the default public HTTPS port `443` and a loopback HTTP backend.
+
+```text
+https://<node>.<tailnet>.ts.net/harness
+    -> http://127.0.0.1:8001/
+
+https://<node>.<tailnet>.ts.net/oauth/google/callback
+    -> http://127.0.0.1:8001/oauth/google/callback
+```
+
+Keep `LOCAL_HARNESS_HTTP_HOST=127.0.0.1`; Funnel terminates public HTTPS and proxies to that local listener. Set `LOCAL_HARNESS_AUTH_BASE_URL` to the public **origin only**, without `/harness`:
+
+```bash
+export LOCAL_HARNESS_ROOTS='["/home/you/source"]'
+export LOCAL_HARNESS_AUTH_ENABLED=true
+export LOCAL_HARNESS_AUTH_WHITELIST='you@example.com'
+export LOCAL_HARNESS_GOOGLE_CLIENT_ID='YOUR_GOOGLE_WEB_CLIENT_ID.apps.googleusercontent.com'
+export LOCAL_HARNESS_GOOGLE_CLIENT_SECRET='YOUR_GOOGLE_WEB_CLIENT_SECRET'
+export LOCAL_HARNESS_AUTH_BASE_URL='https://<node>.<tailnet>.ts.net'
+export LOCAL_HARNESS_HTTP_HOST='127.0.0.1'
+export LOCAL_HARNESS_HTTP_PORT='8001'
+
+# ChatGPT -> harness OAuth client. This is NOT the Google client ID.
+export LOCAL_HARNESS_OAUTH_CLIENT_ID='chatgpt-local-harness'
+export LOCAL_HARNESS_OAUTH_CLIENT_SECRET=''
+export LOCAL_HARNESS_OAUTH_REDIRECT_URIS='https://chatgpt.com/connector/oauth/REPLACE_WITH_CALLBACK_ID'
+
+npm run build
+node dist/index.js
+```
+
+Then create the two Funnel routes. Current Tailscale CLI supports `--bg` for a persistent background configuration and `--set-path` for mounting a local target under a public path:
+
+```bash
+sudo tailscale funnel --bg --set-path /harness \
+  http://127.0.0.1:8001/
+
+sudo tailscale funnel --bg --set-path /oauth/google/callback \
+  http://127.0.0.1:8001/oauth/google/callback
+
+sudo tailscale funnel status
+```
+
+`--bg` makes the Funnel configuration persistent across Tailscale restarts/reboots until you disable it. Funnel is public internet exposure, not tailnet-only access; use `tailscale serve` instead if the service should remain private to your tailnet.
+
+To remove just these mounts later:
+
+```bash
+sudo tailscale funnel --https=443 --set-path=/harness off
+sudo tailscale funnel --https=443 --set-path=/oauth/google/callback off
+```
+
+Or clear the Funnel configuration with `sudo tailscale funnel reset` if you intentionally want to remove all Funnel routes on that node.
+
+#### Google Auth Platform setup
+
+Create a Google OAuth client for the harness in **Google Auth Platform → Clients**. Use application type **Web application**; this is a server-side OAuth flow, so the harness needs both the Google client ID and client secret.
+
+In **Authorized redirect URIs**, add the exact public callback URI:
+
+```text
+https://<node>.<tailnet>.ts.net/oauth/google/callback
+```
+
+The scheme, hostname, path, case, and trailing slash must match the `redirect_uri` sent by the harness. A mismatch produces Google's `redirect_uri_mismatch` error. For this flow you do not need an Authorized JavaScript Origin because the OAuth exchange is performed by the Node.js server rather than browser JavaScript.
+
+Configure **Branding** and **Audience** for your use case. For development or limited personal/team use, you can keep the application in a testing/development posture; for Google Workspace-only deployments, an Internal audience may be appropriate when the Cloud project belongs to that organization. The harness still applies its own `LOCAL_HARNESS_AUTH_WHITELIST` after Google returns a verified email.
+
+For production OAuth apps, follow Google's current verification and domain-ownership requirements. A `*.ts.net` Funnel hostname is particularly convenient for development and private/team workflows; if you need a broadly published production OAuth app, review Google's production verification requirements before relying on a domain you do not own.
+
+Google notes that OAuth client configuration changes can take several minutes, and sometimes longer, to propagate. If a newly added callback still gives `redirect_uri_mismatch`, first compare the exact URI, then retry after the console change has propagated.
+
+#### ChatGPT app setup
+
+In ChatGPT Developer mode, create a custom MCP app and use the public Funnel-mounted harness URL shown by `tailscale funnel status`, for example:
+
+```text
+https://<node>.<tailnet>.ts.net/harness
+```
+
+Choose OAuth authentication. With the user-defined client configuration above:
+
+```text
+OAuth Client ID:          chatgpt-local-harness
+OAuth Client Secret:      leave empty
+Token endpoint auth:      none
+```
+
+If you set `LOCAL_HARNESS_OAUTH_CLIENT_SECRET`, enter that same secret in ChatGPT and choose `client_secret_post` instead. Do **not** use the Google OAuth client ID in ChatGPT's OAuth Client ID field; Google credentials are for the harness-to-Google leg, while ChatGPT authenticates against the harness's own OAuth server.
+
+Copy the callback URL displayed by ChatGPT exactly into `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`. ChatGPT callback URLs commonly have the form:
+
+```text
+https://chatgpt.com/connector/oauth/<callback_id>
+```
+
+After saving the app, use **Scan Tools** and complete the Google sign-in flow. If OAuth succeeds but tool discovery does not, confirm the Funnel routes are still present with `tailscale funnel status` and confirm the harness is still listening on the configured loopback port.
+
+#### Funnel troubleshooting
+
+- `redirect_uri_mismatch` from Google: the Google Web application's Authorized redirect URI does not exactly match `https://<node>.<tailnet>.ts.net/oauth/google/callback`.
+- `invalid_client` from the harness: the ChatGPT OAuth Client ID does not match `LOCAL_HARNESS_OAUTH_CLIENT_ID`, or ChatGPT is still using an older saved app configuration.
+- `X-Forwarded-For` / `express-rate-limit` warnings: this harness trusts only loopback proxies in HTTP mode, which is the expected setup when Funnel proxies to `127.0.0.1`.
+- Public URL works but ChatGPT cannot connect: verify Funnel prerequisites such as MagicDNS, HTTPS certificates, and Funnel permission for the node, then inspect `tailscale funnel status`.
+- Funnel routes disappeared after manual changes: re-run the two `--bg --set-path` commands above. Background Funnel configurations normally resume after Tailscale/device restarts.
+
+Official references:
+
+- [Tailscale Funnel CLI](https://tailscale.com/docs/reference/tailscale-cli/funnel) and [Funnel requirements](https://tailscale.com/docs/features/tailscale-funnel)
+- [Google Auth Platform OAuth clients](https://support.google.com/cloud/answer/15549257) and [web-server OAuth redirect URI rules](https://developers.google.com/identity/protocols/oauth2/web-server)
+- [ChatGPT Developer mode and custom MCP apps](https://help.openai.com/en/articles/12584461-developer-mode-and-mcp-apps-in-chatgpt)
 
 ### Optional code-review-graph tools
 
