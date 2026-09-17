@@ -1,0 +1,29 @@
+{
+  "name": "chatgpt-local-harness",
+  "version": "0.1.0",
+  "description": "Security-conscious local coding tools for ChatGPT Work through a Secure MCP Tunnel.",
+  "author": {
+    "name": "luis0x1",
+    "url": "https://github.com/luis0x1"
+  },
+  "homepage": "https://github.com/luis0x1/chatgpt-local-harness#readme",
+  "repository": "https://github.com/luis0x1/chatgpt-local-harness",
+  "license": "MIT",
+  "keywords": ["mcp", "chatgpt-work", "local-development", "coding"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Local Coding Harness",
+    "shortDescription": "Safely inspect, edit, and test local code",
+    "longDescription": "A workspace-bounded local MCP server for reading, searching, patching, diffing, and verifying code through ChatGPT Work.",
+    "developerName": "luis0x1",
+    "category": "Developer Tools",
+    "capabilities": ["Interactive", "Write"],
+    "websiteURL": "https://github.com/luis0x1/chatgpt-local-harness",
+    "defaultPrompt": [
+      "Inspect this repository and explain its architecture.",
+      "Implement this change and run relevant checks.",
+      "Review the current Git diff for risks."
+    ],
+    "brandColor": "#2563EB"
+  }
+}
