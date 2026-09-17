@@ -35,6 +35,7 @@ The policy blocks known high-risk patterns: broad recursive deletion, shutdown/f
 - An allowed compiler, package manager, test runner, or script can execute repository-controlled code.
 - A malicious dependency can use the current OS user's permissions, including network access permitted by the host.
 - Race-free filesystem confinement requires OS-level sandboxing; the server narrows race windows but cannot eliminate every TOCTOU class on all platforms.
+- Repository search enumerates approved files before applying caller globs. The fallback revalidates each read, but ripgrep still has a TOCTOU window between enumeration and opening a batched path.
 - Command deny patterns may miss encoded, indirect, or novel destructive behavior.
 - Output limits and pattern-based memory redaction reduce exfiltration volume but cannot recognize every secret format or encoded value.
 - Memory files are untrusted input and may be stale, incorrect, or malicious; they must not override tool policy or current source verification.

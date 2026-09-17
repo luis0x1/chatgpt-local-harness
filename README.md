@@ -54,7 +54,7 @@ Do not expect a prompt: stdio is reserved for MCP JSON-RPC. Diagnostics go to st
 | `workspace_open` | Canonicalize an allowed workspace and return its ID | read-only, closed-world     |
 | `file_read`      | Read a bounded UTF-8 file                           | read-only, closed-world     |
 | `file_list`      | Bounded recursive listing with secret/build ignores | read-only, closed-world     |
-| `repo_search`    | Search with `rg`, with a bounded fallback           | read-only, closed-world     |
+| `repo_search`    | Search approved files with `rg` or bounded fallback | read-only, closed-world     |
 | `memory_search`  | Search bounded, redacted local-memory snippets      | read-only, closed-world     |
 | `memory_get`     | Read one bounded, redacted memory file              | read-only, closed-world     |
 | `memory_list`    | List allowlisted local-memory files                 | read-only, closed-world     |
@@ -73,6 +73,16 @@ Do not expect a prompt: stdio is reserved for MCP JSON-RPC. Diagnostics go to st
 The protected file names are `.env`, `.npmrc`, `.pypirc`, `.netrc`, `auth.json`, `credential`, `credentials`, `credential.json`, `credentials.json`, `id_rsa`, `id_ed25519`, `id_ecdsa`, and `id_dsa`. Files beginning with `.env.` and files ending in `.pem`, `.p12`, `.pfx`, or `.key` are also protected.
 
 The sole `.env.*` exception is a terminal file named exactly `.env.example`; descendants below a directory with that name remain protected. Matching uses whole path components or documented suffixes, so normal source names such as `src/git-client.ts` and `src/build-helper.ts` remain visible. Recursive listings omit protected entries, while a protected starting path is rejected.
+
+## Repository search semantics
+
+`repo_search` treats `query` as a literal string in both engines. Before searching, it enumerates files through the same sensitive-path policy as `file_list`; the optional caller `glob` is then applied only as an additional narrowing filter. The caller glob is never passed to ripgrep and therefore cannot override protected-path exclusions.
+
+Glob matching uses Minimatch against `/`-normalized paths relative to `cwd`. Broad globs, negation, brace expansion, basename patterns, and hidden non-sensitive files are supported. Patterns must be 1-1024 characters, relative, single-line, free of NUL bytes, and cannot contain parent traversal. Unsupported or unsafe patterns return a validation error.
+
+Both engines receive the same bounded candidate list. Ripgrep searches those candidates in batches; the fallback reads the same candidates through `file_read` checks. Returned output remains bounded after filtering, and the result identifies `engine` as `rg` or `fallback`.
+
+There is a residual TOCTOU window between candidate enumeration and ripgrep opening a file. A path swapped during that interval could be read with the harness OS user's permissions. The fallback revalidates every file at read time, but portable race-free confinement requires an OS sandbox.
 
 ## Configuration
 
