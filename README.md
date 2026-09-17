@@ -47,6 +47,41 @@ node .\dist\index.js
 
 Do not expect a prompt: stdio is reserved for MCP JSON-RPC. Diagnostics go to stderr.
 
+### Optional Google OAuth mode
+
+Set `LOCAL_HARNESS_AUTH_ENABLED=true` to switch from stdio to a Streamable HTTP MCP endpoint at `/mcp`. The startup log prints `Authentication required: yes.` when this mode is active and `Authentication required: no.` otherwise.
+
+OAuth mode requires a Google OAuth **Web application** client plus an explicit email whitelist:
+
+```bash
+export LOCAL_HARNESS_AUTH_ENABLED=true
+export LOCAL_HARNESS_AUTH_WHITELIST='you@example.com,teammate@example.com'
+export LOCAL_HARNESS_GOOGLE_CLIENT_ID='...'
+export LOCAL_HARNESS_GOOGLE_CLIENT_SECRET='...'
+export LOCAL_HARNESS_AUTH_BASE_URL='http://127.0.0.1:3000'
+export LOCAL_HARNESS_HTTP_HOST='127.0.0.1'
+export LOCAL_HARNESS_HTTP_PORT='3000'
+node dist/index.js
+```
+
+Register `${LOCAL_HARNESS_AUTH_BASE_URL}/oauth/google/callback` as an authorized redirect URI in the Google OAuth client. For a remote/tunneled deployment, set `LOCAL_HARNESS_AUTH_BASE_URL` to the externally reachable HTTPS origin instead of the loopback default. Plain HTTP is accepted only for loopback development.
+
+For ChatGPT's **User-Defined OAuth Client** mode, pre-register one client in the harness:
+
+```bash
+export LOCAL_HARNESS_OAUTH_CLIENT_ID='chatgpt-local-harness'
+export LOCAL_HARNESS_OAUTH_CLIENT_SECRET='replace-with-a-random-secret'
+export LOCAL_HARNESS_OAUTH_REDIRECT_URIS='https://chatgpt.com/connector/oauth/REPLACE_WITH_CALLBACK_ID'
+```
+
+Use the exact Callback URL shown by ChatGPT for `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`; the OAuth server rejects unregistered redirect URIs. Enter the same `LOCAL_HARNESS_OAUTH_CLIENT_ID` and `LOCAL_HARNESS_OAUTH_CLIENT_SECRET` in ChatGPT. When a secret is configured, choose `client_secret_post` as the token endpoint auth method. If no secret is configured, choose `none`.
+
+The configured user-defined client coexists with Dynamic Client Registration. DCR remains available through `/register`; the static client is simply preloaded into the same client store so authorization and token requests can resolve its `client_id`.
+
+The harness acts as the OAuth authorization server for MCP clients. Google is used only to verify the end user's identity. A verified Google email must exactly match the case-insensitive whitelist before the harness approves the authorization request. The harness then issues its own one-hour access token and rotating refresh token; Google access tokens are not returned to MCP clients.
+
+OAuth client registrations, authorization state, access tokens, and refresh tokens are held in memory and are invalidated when the harness restarts. The `/mcp` endpoint requires a valid bearer token while OAuth discovery, registration, authorization, token, revocation, and Google callback endpoints remain reachable as required by the OAuth flow.
+
 ## Tools
 
 | Tool             | Purpose                                             | Key annotation              |
@@ -86,18 +121,28 @@ There is a residual TOCTOU window between candidate enumeration and ripgrep open
 
 ## Configuration
 
-| Variable                           | Default           | Meaning                                                          |
-| ---------------------------------- | ----------------- | ---------------------------------------------------------------- |
-| `LOCAL_HARNESS_ROOTS`              | required          | JSON array (preferred) or platform-delimited allowed roots       |
-| `LOCAL_HARNESS_MEMORY_ROOT`        | disabled          | Separate, existing, read-only local-memory root                  |
-| `LOCAL_HARNESS_ALLOWED_COMMANDS`   | empty additions   | Comma-separated additions to the executable allowlist            |
-| `LOCAL_HARNESS_ENV_ALLOWLIST`      | empty additions   | Explicit child environment keys; secret-shaped keys stay blocked |
-| `LOCAL_HARNESS_DEFAULT_TIMEOUT_MS` | `120000`          | Default command timeout                                          |
-| `LOCAL_HARNESS_MAX_TIMEOUT_MS`     | `300000`          | Maximum accepted timeout                                         |
-| `LOCAL_HARNESS_MAX_OUTPUT_BYTES`   | `1048576`         | Combined stdout/stderr cap                                       |
-| `LOCAL_HARNESS_MAX_FILE_BYTES`     | `1048576`         | File-read cap                                                    |
-| `LOCAL_HARNESS_AUDIT_LOG`          | OS temp directory | JSONL audit log path                                             |
-| `LOCAL_HARNESS_ALLOW_UNC`          | `false`           | Allow intentionally configured UNC roots                         |
+| Variable                             | Default           | Meaning                                                           |
+| ------------------------------------ | ----------------- | ----------------------------------------------------------------- |
+| `LOCAL_HARNESS_ROOTS`                | required          | JSON array (preferred) or platform-delimited allowed roots        |
+| `LOCAL_HARNESS_MEMORY_ROOT`          | disabled          | Separate, existing, read-only local-memory root                   |
+| `LOCAL_HARNESS_ALLOWED_COMMANDS`     | empty additions   | Comma-separated additions to the executable allowlist             |
+| `LOCAL_HARNESS_ENV_ALLOWLIST`        | empty additions   | Explicit child environment keys; secret-shaped keys stay blocked  |
+| `LOCAL_HARNESS_DEFAULT_TIMEOUT_MS`   | `120000`          | Default command timeout                                           |
+| `LOCAL_HARNESS_MAX_TIMEOUT_MS`       | `300000`          | Maximum accepted timeout                                          |
+| `LOCAL_HARNESS_MAX_OUTPUT_BYTES`     | `1048576`         | Combined stdout/stderr cap                                        |
+| `LOCAL_HARNESS_MAX_FILE_BYTES`       | `1048576`         | File-read cap                                                     |
+| `LOCAL_HARNESS_AUDIT_LOG`            | OS temp directory | JSONL audit log path                                              |
+| `LOCAL_HARNESS_ALLOW_UNC`            | `false`           | Allow intentionally configured UNC roots                          |
+| `LOCAL_HARNESS_AUTH_ENABLED`         | `false`           | Enable Google OAuth and switch MCP transport from stdio to HTTP   |
+| `LOCAL_HARNESS_AUTH_WHITELIST`       | empty             | Comma-separated Google email addresses allowed to authenticate    |
+| `LOCAL_HARNESS_GOOGLE_CLIENT_ID`     | empty             | Google OAuth Web application client ID                            |
+| `LOCAL_HARNESS_GOOGLE_CLIENT_SECRET` | empty             | Google OAuth Web application client secret                        |
+| `LOCAL_HARNESS_OAUTH_CLIENT_ID`      | empty             | Pre-registered client ID for User-Defined OAuth Client mode       |
+| `LOCAL_HARNESS_OAUTH_CLIENT_SECRET`  | empty             | Optional secret for the pre-registered OAuth client               |
+| `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`  | empty             | Comma-separated exact redirect URIs for the pre-registered client |
+| `LOCAL_HARNESS_AUTH_BASE_URL`        | loopback HTTP URL | Public origin used for OAuth metadata and Google callback         |
+| `LOCAL_HARNESS_HTTP_HOST`            | `127.0.0.1`       | Bind host used in OAuth/HTTP mode                                 |
+| `LOCAL_HARNESS_HTTP_PORT`            | `3000`            | Bind port used in OAuth/HTTP mode                                 |
 
 The child environment starts from a small portability allowlist. OpenAI/control-plane keys, `AWS_*`, `AZURE_*`, `GOOGLE_*`, GitHub/NPM tokens, `SSH_AUTH_SOCK`, `DATABASE_URL`, and keys ending in `_SECRET`, `_TOKEN`, or `_PASSWORD` are always removed.
 
