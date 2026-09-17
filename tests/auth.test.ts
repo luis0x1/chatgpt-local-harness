@@ -151,6 +151,21 @@ describe("authentication configuration", () => {
     expect(config.authBaseUrl).toBeUndefined();
   });
 
+  it("keeps code-review-graph disabled by default", () => {
+    const config = loadConfig(baseEnv);
+    expect(config.codeGraphEnabled).toBe(false);
+    expect(config.codeGraphCommand).toBe("code-review-graph");
+  });
+
+  it("loads code-review-graph without a fixed repository", () => {
+    const config = loadConfig({
+      ...baseEnv,
+      LOCAL_HARNESS_CODE_GRAPH_ENABLED: "true",
+    });
+    expect(config.codeGraphEnabled).toBe(true);
+    expect(config.codeGraphCommand).toBe("code-review-graph");
+  });
+
   it("requires Google credentials and an email whitelist when enabled", () => {
     expect(() => loadConfig({ ...baseEnv, LOCAL_HARNESS_AUTH_ENABLED: "true" })).toThrow(
       "LOCAL_HARNESS_AUTH_WHITELIST",

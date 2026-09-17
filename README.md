@@ -82,6 +82,21 @@ The harness acts as the OAuth authorization server for MCP clients. Google is us
 
 OAuth client registrations, authorization state, access tokens, and refresh tokens are held in memory and are invalidated when the harness restarts. The `/mcp` endpoint requires a valid bearer token while OAuth discovery, registration, authorization, token, revocation, and Google callback endpoints remain reachable as required by the OAuth flow.
 
+### Optional code-review-graph tools
+
+The harness can spawn `code-review-graph` as an internal MCP stdio child and re-expose selected graph tools through the same parent MCP server. This means ChatGPT discovers the graph tools from the normal `/mcp` endpoint and, in HTTP mode, the existing OAuth bearer authentication protects them automatically.
+
+```bash
+export LOCAL_HARNESS_CODE_GRAPH_ENABLED=true
+export LOCAL_HARNESS_CODE_GRAPH_COMMAND='code-review-graph'
+```
+
+The graph repository follows the workspace selected by the agent. Call `workspace_open` first and pass its returned `workspaceId` to each graph tool. The harness resolves that ID to the canonical workspace path and supplies it to `code-review-graph` as `repo_root`; MCP clients cannot provide an arbitrary repository path.
+
+The exposed graph tools are `get_minimal_context_tool`, `get_impact_radius_tool`, `get_review_context_tool`, `query_graph_tool`, `detect_changes_tool`, `get_architecture_overview_tool`, and `list_graph_stats_tool`. Their names, descriptions, input shapes, and annotations are discovered from a child with `Client.listTools()` at startup. A graph child is then started lazily and cached per opened workspace, and calls are forwarded with `Client.callTool()` over `StdioClientTransport`.
+
+The `code-review-graph` executable must be available on the harness process `PATH`, or set `LOCAL_HARNESS_CODE_GRAPH_COMMAND` to the executable path. If the child cannot start or tool discovery fails, harness startup fails instead of silently omitting the graph tools.
+
 ## Tools
 
 | Tool             | Purpose                                             | Key annotation              |
@@ -121,28 +136,30 @@ There is a residual TOCTOU window between candidate enumeration and ripgrep open
 
 ## Configuration
 
-| Variable                             | Default           | Meaning                                                           |
-| ------------------------------------ | ----------------- | ----------------------------------------------------------------- |
-| `LOCAL_HARNESS_ROOTS`                | required          | JSON array (preferred) or platform-delimited allowed roots        |
-| `LOCAL_HARNESS_MEMORY_ROOT`          | disabled          | Separate, existing, read-only local-memory root                   |
-| `LOCAL_HARNESS_ALLOWED_COMMANDS`     | empty additions   | Comma-separated additions to the executable allowlist             |
-| `LOCAL_HARNESS_ENV_ALLOWLIST`        | empty additions   | Explicit child environment keys; secret-shaped keys stay blocked  |
-| `LOCAL_HARNESS_DEFAULT_TIMEOUT_MS`   | `120000`          | Default command timeout                                           |
-| `LOCAL_HARNESS_MAX_TIMEOUT_MS`       | `300000`          | Maximum accepted timeout                                          |
-| `LOCAL_HARNESS_MAX_OUTPUT_BYTES`     | `1048576`         | Combined stdout/stderr cap                                        |
-| `LOCAL_HARNESS_MAX_FILE_BYTES`       | `1048576`         | File-read cap                                                     |
-| `LOCAL_HARNESS_AUDIT_LOG`            | OS temp directory | JSONL audit log path                                              |
-| `LOCAL_HARNESS_ALLOW_UNC`            | `false`           | Allow intentionally configured UNC roots                          |
-| `LOCAL_HARNESS_AUTH_ENABLED`         | `false`           | Enable Google OAuth and switch MCP transport from stdio to HTTP   |
-| `LOCAL_HARNESS_AUTH_WHITELIST`       | empty             | Comma-separated Google email addresses allowed to authenticate    |
-| `LOCAL_HARNESS_GOOGLE_CLIENT_ID`     | empty             | Google OAuth Web application client ID                            |
-| `LOCAL_HARNESS_GOOGLE_CLIENT_SECRET` | empty             | Google OAuth Web application client secret                        |
-| `LOCAL_HARNESS_OAUTH_CLIENT_ID`      | empty             | Pre-registered client ID for User-Defined OAuth Client mode       |
-| `LOCAL_HARNESS_OAUTH_CLIENT_SECRET`  | empty             | Optional secret for the pre-registered OAuth client               |
-| `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`  | empty             | Comma-separated exact redirect URIs for the pre-registered client |
-| `LOCAL_HARNESS_AUTH_BASE_URL`        | loopback HTTP URL | Public origin used for OAuth metadata and Google callback         |
-| `LOCAL_HARNESS_HTTP_HOST`            | `127.0.0.1`       | Bind host used in OAuth/HTTP mode                                 |
-| `LOCAL_HARNESS_HTTP_PORT`            | `3000`            | Bind port used in OAuth/HTTP mode                                 |
+| Variable                             | Default             | Meaning                                                            |
+| ------------------------------------ | ------------------- | ------------------------------------------------------------------ |
+| `LOCAL_HARNESS_ROOTS`                | required            | JSON array (preferred) or platform-delimited allowed roots         |
+| `LOCAL_HARNESS_MEMORY_ROOT`          | disabled            | Separate, existing, read-only local-memory root                    |
+| `LOCAL_HARNESS_ALLOWED_COMMANDS`     | empty additions     | Comma-separated additions to the executable allowlist              |
+| `LOCAL_HARNESS_ENV_ALLOWLIST`        | empty additions     | Explicit child environment keys; secret-shaped keys stay blocked   |
+| `LOCAL_HARNESS_DEFAULT_TIMEOUT_MS`   | `120000`            | Default command timeout                                            |
+| `LOCAL_HARNESS_MAX_TIMEOUT_MS`       | `300000`            | Maximum accepted timeout                                           |
+| `LOCAL_HARNESS_MAX_OUTPUT_BYTES`     | `1048576`           | Combined stdout/stderr cap                                         |
+| `LOCAL_HARNESS_MAX_FILE_BYTES`       | `1048576`           | File-read cap                                                      |
+| `LOCAL_HARNESS_AUDIT_LOG`            | OS temp directory   | JSONL audit log path                                               |
+| `LOCAL_HARNESS_ALLOW_UNC`            | `false`             | Allow intentionally configured UNC roots                           |
+| `LOCAL_HARNESS_AUTH_ENABLED`         | `false`             | Enable Google OAuth and switch MCP transport from stdio to HTTP    |
+| `LOCAL_HARNESS_AUTH_WHITELIST`       | empty               | Comma-separated Google email addresses allowed to authenticate     |
+| `LOCAL_HARNESS_GOOGLE_CLIENT_ID`     | empty               | Google OAuth Web application client ID                             |
+| `LOCAL_HARNESS_GOOGLE_CLIENT_SECRET` | empty               | Google OAuth Web application client secret                         |
+| `LOCAL_HARNESS_OAUTH_CLIENT_ID`      | empty               | Pre-registered client ID for User-Defined OAuth Client mode        |
+| `LOCAL_HARNESS_OAUTH_CLIENT_SECRET`  | empty               | Optional secret for the pre-registered OAuth client                |
+| `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`  | empty               | Comma-separated exact redirect URIs for the pre-registered client  |
+| `LOCAL_HARNESS_AUTH_BASE_URL`        | loopback HTTP URL   | Public origin used for OAuth metadata and Google callback          |
+| `LOCAL_HARNESS_HTTP_HOST`            | `127.0.0.1`         | Bind host used in OAuth/HTTP mode                                  |
+| `LOCAL_HARNESS_HTTP_PORT`            | `3000`              | Bind port used in OAuth/HTTP mode                                  |
+| `LOCAL_HARNESS_CODE_GRAPH_ENABLED`   | `false`             | Re-expose selected code-review-graph tools through this MCP server |
+| `LOCAL_HARNESS_CODE_GRAPH_COMMAND`   | `code-review-graph` | Executable used for the internal MCP stdio child                   |
 
 The child environment starts from a small portability allowlist. OpenAI/control-plane keys, `AWS_*`, `AZURE_*`, `GOOGLE_*`, GitHub/NPM tokens, `SSH_AUTH_SOCK`, `DATABASE_URL`, and keys ending in `_SECRET`, `_TOKEN`, or `_PASSWORD` are always removed.
 

@@ -1,5 +1,6 @@
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
+import { attachCodeGraphTools } from "./code-graph-proxy.js";
 import type { AppConfig } from "./config.js";
 import { SERVER_INSTRUCTIONS } from "./server-instructions.js";
 import { AuditLog } from "./security/audit-log.js";
@@ -294,6 +295,22 @@ export async function createServer(config: AppConfig): Promise<McpServer> {
       );
     },
   );
+
+  if (config.codeGraphEnabled) {
+    const bridge = await attachCodeGraphTools(server, {
+      command: config.codeGraphCommand,
+      metadataRepoRoot: pathPolicy.roots[0]!,
+      resolveWorkspace: (workspaceId) => workspaces.get(workspaceId).path,
+    });
+    const closeParent = server.close.bind(server);
+    server.close = async () => {
+      try {
+        await closeParent();
+      } finally {
+        await bridge.close();
+      }
+    };
+  }
 
   return server;
 }

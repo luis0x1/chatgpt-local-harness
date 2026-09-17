@@ -24,6 +24,8 @@ export function testConfig(root: string, overrides: Partial<AppConfig> = {}): Ap
     authBaseUrl: undefined,
     httpHost: "127.0.0.1",
     httpPort: 3000,
+    codeGraphEnabled: false,
+    codeGraphCommand: "code-review-graph",
     ...overrides,
   };
 }

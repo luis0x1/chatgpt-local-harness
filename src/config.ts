@@ -22,6 +22,8 @@ export interface AppConfig {
   authBaseUrl: URL | undefined;
   httpHost: string;
   httpPort: number;
+  codeGraphEnabled: boolean;
+  codeGraphCommand: string;
 }
 
 function positiveInteger(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -130,6 +132,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const configuredAuthBaseUrl = parseAuthBaseUrl(env.LOCAL_HARNESS_AUTH_BASE_URL);
   const httpHost = env.LOCAL_HARNESS_HTTP_HOST?.trim() || "127.0.0.1";
   const httpPort = positiveInteger(env, "LOCAL_HARNESS_HTTP_PORT", 3000);
+  const codeGraphEnabled = boolean(env, "LOCAL_HARNESS_CODE_GRAPH_ENABLED");
+  const codeGraphCommand = env.LOCAL_HARNESS_CODE_GRAPH_COMMAND?.trim() || "code-review-graph";
   if (httpPort > 65_535) throw new Error("LOCAL_HARNESS_HTTP_PORT must be at most 65535");
   if (authEnabled && !configuredAuthBaseUrl && !isLoopbackHost(httpHost)) {
     throw new Error(
@@ -186,6 +190,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
       configuredAuthBaseUrl ?? (authEnabled ? new URL(`http://127.0.0.1:${httpPort}`) : undefined),
     httpHost,
     httpPort,
+    codeGraphEnabled,
+    codeGraphCommand,
   };
 }
 

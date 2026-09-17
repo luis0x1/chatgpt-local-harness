@@ -56,7 +56,7 @@ export async function startAuthenticatedHttpServer(config: AppConfig): Promise<R
     allowedHosts: [baseUrl.hostname],
   });
   app.set("trust proxy", "loopback");
-  
+
   app.get("/oauth/google/callback", async (req: Request, res: Response) => {
     try {
       const requestUrl = new URL(req.originalUrl, baseUrl);
