@@ -66,6 +66,14 @@ Do not expect a prompt: stdio is reserved for MCP JSON-RPC. Diagnostics go to st
 
 `command_exec` is the default execution tool. `shell_exec` can modify/delete files, launch processes, and access the network; explain the exact command and purpose before calling it.
 
+## Workspace file visibility
+
+`file_read` and `file_list` apply one case-insensitive policy to every component of both the requested path and its canonical target. Components may be separated by either `/` or `\\`. Exact protected directory names are `.git`, `node_modules`, `dist`, `build`, `coverage`, `.next`, `.svelte-kit`, and `target`.
+
+The protected file names are `.env`, `.npmrc`, `.pypirc`, `.netrc`, `auth.json`, `credential`, `credentials`, `credential.json`, `credentials.json`, `id_rsa`, `id_ed25519`, `id_ecdsa`, and `id_dsa`. Files beginning with `.env.` and files ending in `.pem`, `.p12`, `.pfx`, or `.key` are also protected.
+
+The sole `.env.*` exception is a terminal file named exactly `.env.example`; descendants below a directory with that name remain protected. Matching uses whole path components or documented suffixes, so normal source names such as `src/git-client.ts` and `src/build-helper.ts` remain visible. Recursive listings omit protected entries, while a protected starting path is rejected.
+
 ## Configuration
 
 | Variable                           | Default           | Meaning                                                          |

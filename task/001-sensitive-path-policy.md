@@ -1,6 +1,6 @@
 # Task 001: Enforce sensitive-path policy on every file operation
 
-Status: Proposed  
+Status: Completed  
 Priority: P0  
 Severity: High  
 Area: File boundary
@@ -35,3 +35,12 @@ This contradicts the documented promise that file reading omits VCS, dependency,
 - .env.example behavior is intentional and tested.
 - Mixed separators and case behavior are tested where the platform requires it.
 - A normal filename containing a protected word, such as src/git-client.ts, remains readable.
+
+## Implementation
+
+Completed on 2026-09-17.
+
+- Added a shared, component-aware sensitive-path policy for requested and canonical paths.
+- Applied the policy to direct reads, listing roots, and recursive listing filters.
+- Kept exactly `.env.example` readable as a terminal filename and documented the protected set.
+- Added regression coverage for protected ancestors, listing roots, separator/case handling, canonical symlink targets, and normal filenames containing protected words.

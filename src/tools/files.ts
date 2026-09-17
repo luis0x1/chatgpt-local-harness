@@ -1,29 +1,7 @@
 import { lstat, opendir, readFile, stat } from "node:fs/promises";
 import path from "node:path";
 import type { PathPolicy } from "../security/path-policy.js";
-
-const IGNORED_NAMES = new Set([
-  ".git",
-  "node_modules",
-  "dist",
-  "build",
-  "coverage",
-  ".next",
-  ".svelte-kit",
-  "target",
-  ".env",
-]);
-
-const SECRET_FILE_PATTERNS = [
-  /^\.env\./,
-  /^(?:id_rsa|id_ed25519)$/,
-  /\.(?:pem|p12|pfx|key)$/i,
-  /credentials?(?:\.json)?$/i,
-];
-
-function shouldIgnore(name: string): boolean {
-  return IGNORED_NAMES.has(name) || SECRET_FILE_PATTERNS.some((pattern) => pattern.test(name));
-}
+import { assertReadablePath, isSensitivePath } from "../security/sensitive-path-policy.js";
 
 export interface FileEntry {
   path: string;
@@ -41,9 +19,10 @@ export class FileTools {
     workspace: string,
     relativePath: string,
   ): Promise<{ path: string; content: string; size: number }> {
-    if (shouldIgnore(path.basename(relativePath)))
-      throw new Error("Sensitive or ignored files cannot be read");
+    const readOptions = { allowEnvExample: true };
+    assertReadablePath(relativePath, readOptions);
     const resolved = await this.pathPolicy.resolveExisting(workspace, relativePath);
+    assertReadablePath(path.relative(workspace, resolved), readOptions);
     const metadata = await stat(resolved);
     if (!metadata.isFile()) throw new Error("Requested path is not a regular file");
     if (metadata.size > this.maxFileBytes) {
@@ -58,7 +37,9 @@ export class FileTools {
     maxDepth: number,
     maxEntries: number,
   ): Promise<{ entries: FileEntry[]; truncated: boolean }> {
+    assertReadablePath(relativePath);
     const start = await this.pathPolicy.resolveExisting(workspace, relativePath);
+    assertReadablePath(path.relative(workspace, start));
     const entries: FileEntry[] = [];
     let truncated = false;
 
@@ -66,13 +47,13 @@ export class FileTools {
       if (truncated) return;
       const directory = await opendir(absolute);
       for await (const entry of directory) {
-        if (shouldIgnore(entry.name)) continue;
+        const entryAbsolute = path.join(absolute, entry.name);
+        const entryRelative = path.relative(workspace, entryAbsolute);
+        if (isSensitivePath(entryRelative, { allowEnvExample: entry.isFile() })) continue;
         if (entries.length >= maxEntries) {
           truncated = true;
           break;
         }
-        const entryAbsolute = path.join(absolute, entry.name);
-        const entryRelative = path.relative(workspace, entryAbsolute);
         const info = await lstat(entryAbsolute).catch(() => undefined);
         const type = entry.isSymbolicLink()
           ? "symlink"

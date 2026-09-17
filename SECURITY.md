@@ -20,7 +20,9 @@ The server is intended to run as a low-privilege local user, ideally in a dispos
 
 Secret-shaped environment keys are never forwarded, even if accidentally added to the configured allowlist. This includes OpenAI/control-plane keys, cloud-provider variables, GitHub/NPM tokens, SSH agent sockets, database URLs, and names ending in `_SECRET`, `_TOKEN`, or `_PASSWORD`.
 
-Workspace file listing and reading omit common `.env`, private-key, credential, dependency, VCS, and build-output paths by default. Memory tools only expose allowlisted text extensions, exclude hidden entries and project scopes from global reads, bound results/output, and redact common token, API-key, password, URL-credential, JWT, and private-key forms. Audit records store metadata and a redacted/truncated command, not file contents or child environments.
+Workspace file listing and reading apply the same case-insensitive policy to every requested and canonical path component. The protected directory components are `.git`, `node_modules`, `dist`, `build`, `coverage`, `.next`, `.svelte-kit`, and `target`. Protected files are `.env`, every `.env.*` variant except the exact terminal filename `.env.example`, `.npmrc`, `.pypirc`, `.netrc`, `auth.json`, credential/credentials with an optional `.json` suffix, common SSH private-key names, and `.pem`, `.p12`, `.pfx`, or `.key` suffixes. Recursive listings omit these entries; direct reads and protected listing roots are rejected. Canonical-target checks prevent an allowed-looking symlink from entering a protected path.
+
+Memory tools only expose allowlisted text extensions, exclude hidden entries and project scopes from global reads, bound results/output, and redact common token, API-key, password, URL-credential, JWT, and private-key forms. Audit records store metadata and a redacted/truncated command, not file contents or child environments.
 
 ## Command policy
 
