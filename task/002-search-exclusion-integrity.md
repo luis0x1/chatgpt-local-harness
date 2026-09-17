@@ -1,6 +1,6 @@
 # Task 002: Make repository search exclusions non-overridable
 
-Status: Proposed  
+Status: Completed  
 Priority: P0  
 Severity: High  
 Area: Search boundary  
@@ -35,3 +35,14 @@ When ripgrep is unavailable, the fallback ignores the glob argument entirely. Th
 - Force fallback mode and run the same table-driven cases.
 - Verify a normal narrowing glob such as src/**/*.ts works in both engines.
 - Test a symlink swap or document the remaining TOCTOU limitation if it cannot be eliminated portably.
+
+## Implementation
+
+Completed on 2026-09-17.
+
+- Enumerated candidates through `FileTools.list` before either search engine runs.
+- Applied one validated Minimatch glob to the approved candidate set; caller patterns are never forwarded to ripgrep.
+- Batched only approved paths into ripgrep and made both engines use literal-query semantics, the same relative output paths, and one combined output limit.
+- Revalidated fallback reads through `FileTools.read`.
+- Added table-driven coverage for rg and forced fallback modes, including positive override attempts, broad/negated/brace globs, hidden files, protected descendants, validation, and truncation.
+- Documented the remaining ripgrep TOCTOU window in README and SECURITY.md.
