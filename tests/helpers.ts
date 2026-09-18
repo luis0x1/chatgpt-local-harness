@@ -14,6 +14,18 @@ export function testConfig(root: string, overrides: Partial<AppConfig> = {}): Ap
     maxFileBytes: 64 * 1024,
     auditLogPath: path.join(os.tmpdir(), `local-harness-test-${process.pid}.jsonl`),
     allowUnc: false,
+    authEnabled: false,
+    authWhitelist: [],
+    googleClientId: undefined,
+    googleClientSecret: undefined,
+    oauthClientId: undefined,
+    oauthClientSecret: undefined,
+    oauthRedirectUris: [],
+    authBaseUrl: undefined,
+    httpHost: "127.0.0.1",
+    httpPort: 3000,
+    codeGraphEnabled: false,
+    codeGraphCommand: "code-review-graph",
     ...overrides,
   };
 }

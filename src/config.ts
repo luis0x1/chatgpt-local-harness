@@ -12,6 +12,18 @@ export interface AppConfig {
   maxFileBytes: number;
   auditLogPath: string;
   allowUnc: boolean;
+  authEnabled: boolean;
+  authWhitelist: string[];
+  googleClientId: string | undefined;
+  googleClientSecret: string | undefined;
+  oauthClientId: string | undefined;
+  oauthClientSecret: string | undefined;
+  oauthRedirectUris: string[];
+  authBaseUrl: URL | undefined;
+  httpHost: string;
+  httpPort: number;
+  codeGraphEnabled: boolean;
+  codeGraphCommand: string;
 }
 
 function positiveInteger(env: NodeJS.ProcessEnv, key: string, fallback: number): number {
@@ -28,6 +40,55 @@ function csv(value: string | undefined): string[] {
     .split(",")
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function urls(value: string | undefined, key: string): string[] {
+  return csv(value).map((item) => {
+    let url: URL;
+    try {
+      url = new URL(item);
+    } catch {
+      throw new Error(`${key} must contain valid absolute URLs`);
+    }
+    if (!["http:", "https:"].includes(url.protocol)) {
+      throw new Error(`${key} must contain only http or https URLs`);
+    }
+    if (url.username || url.password) {
+      throw new Error(`${key} must not contain credentials`);
+    }
+    return item;
+  });
+}
+
+function boolean(env: NodeJS.ProcessEnv, key: string, fallback = false): boolean {
+  const raw = env[key];
+  if (raw === undefined || raw.trim() === "") return fallback;
+  if (raw.toLowerCase() === "true") return true;
+  if (raw.toLowerCase() === "false") return false;
+  throw new Error(`${key} must be true or false`);
+}
+
+function isLoopbackHost(host: string): boolean {
+  return ["127.0.0.1", "localhost", "::1", "[::1]"].includes(host.toLowerCase());
+}
+
+function parseAuthBaseUrl(raw: string | undefined): URL | undefined {
+  if (raw === undefined || raw.trim() === "") return undefined;
+  const url = new URL(raw);
+  if (!["http:", "https:"].includes(url.protocol)) {
+    throw new Error("LOCAL_HARNESS_AUTH_BASE_URL must use http or https");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("LOCAL_HARNESS_AUTH_BASE_URL must not contain credentials, query, or fragment");
+  }
+  url.pathname = url.pathname.replace(/\/+$/, "") || "/";
+  if (url.pathname !== "/") {
+    throw new Error("LOCAL_HARNESS_AUTH_BASE_URL must be an origin without a path");
+  }
+  if (url.protocol === "http:" && !isLoopbackHost(url.hostname)) {
+    throw new Error("LOCAL_HARNESS_AUTH_BASE_URL must use https outside loopback");
+  }
+  return url;
 }
 
 export function parseWorkspaceRoots(raw: string | undefined): string[] {
@@ -58,6 +119,53 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   if (defaultTimeoutMs > maxTimeoutMs) {
     throw new Error("LOCAL_HARNESS_DEFAULT_TIMEOUT_MS cannot exceed LOCAL_HARNESS_MAX_TIMEOUT_MS");
   }
+  const authEnabled = boolean(env, "LOCAL_HARNESS_AUTH_ENABLED");
+  const authWhitelist = csv(env.LOCAL_HARNESS_AUTH_WHITELIST).map((email) => email.toLowerCase());
+  const googleClientId = env.LOCAL_HARNESS_GOOGLE_CLIENT_ID?.trim() || undefined;
+  const googleClientSecret = env.LOCAL_HARNESS_GOOGLE_CLIENT_SECRET?.trim() || undefined;
+  const oauthClientId = env.LOCAL_HARNESS_OAUTH_CLIENT_ID?.trim() || undefined;
+  const oauthClientSecret = env.LOCAL_HARNESS_OAUTH_CLIENT_SECRET?.trim() || undefined;
+  const oauthRedirectUris = urls(
+    env.LOCAL_HARNESS_OAUTH_REDIRECT_URIS,
+    "LOCAL_HARNESS_OAUTH_REDIRECT_URIS",
+  );
+  const configuredAuthBaseUrl = parseAuthBaseUrl(env.LOCAL_HARNESS_AUTH_BASE_URL);
+  const httpHost = env.LOCAL_HARNESS_HTTP_HOST?.trim() || "127.0.0.1";
+  const httpPort = positiveInteger(env, "LOCAL_HARNESS_HTTP_PORT", 3000);
+  const codeGraphEnabled = boolean(env, "LOCAL_HARNESS_CODE_GRAPH_ENABLED");
+  const codeGraphCommand = env.LOCAL_HARNESS_CODE_GRAPH_COMMAND?.trim() || "code-review-graph";
+  if (httpPort > 65_535) throw new Error("LOCAL_HARNESS_HTTP_PORT must be at most 65535");
+  if (authEnabled && !configuredAuthBaseUrl && !isLoopbackHost(httpHost)) {
+    throw new Error(
+      "LOCAL_HARNESS_AUTH_BASE_URL is required when authentication binds outside loopback",
+    );
+  }
+
+  if (authEnabled) {
+    if (authWhitelist.length === 0) {
+      throw new Error("LOCAL_HARNESS_AUTH_WHITELIST is required when authentication is enabled");
+    }
+    if (!googleClientId) {
+      throw new Error("LOCAL_HARNESS_GOOGLE_CLIENT_ID is required when authentication is enabled");
+    }
+    if (!googleClientSecret) {
+      throw new Error(
+        "LOCAL_HARNESS_GOOGLE_CLIENT_SECRET is required when authentication is enabled",
+      );
+    }
+  }
+  if (!oauthClientId && oauthClientSecret) {
+    throw new Error("LOCAL_HARNESS_OAUTH_CLIENT_ID is required when OAuth client secret is set");
+  }
+  if (!oauthClientId && oauthRedirectUris.length > 0) {
+    throw new Error("LOCAL_HARNESS_OAUTH_CLIENT_ID is required when OAuth redirect URIs are set");
+  }
+  if (oauthClientId && oauthRedirectUris.length === 0) {
+    throw new Error(
+      "LOCAL_HARNESS_OAUTH_REDIRECT_URIS is required when LOCAL_HARNESS_OAUTH_CLIENT_ID is set",
+    );
+  }
+
   return {
     workspaceRoots: parseWorkspaceRoots(env.LOCAL_HARNESS_ROOTS),
     memoryRoot: env.LOCAL_HARNESS_MEMORY_ROOT?.trim() || undefined,
@@ -70,7 +178,20 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     auditLogPath:
       env.LOCAL_HARNESS_AUDIT_LOG?.trim() ||
       path.join(os.tmpdir(), "local-coding-harness-audit.jsonl"),
-    allowUnc: env.LOCAL_HARNESS_ALLOW_UNC?.toLowerCase() === "true",
+    allowUnc: boolean(env, "LOCAL_HARNESS_ALLOW_UNC"),
+    authEnabled,
+    authWhitelist,
+    googleClientId,
+    googleClientSecret,
+    oauthClientId,
+    oauthClientSecret,
+    oauthRedirectUris,
+    authBaseUrl:
+      configuredAuthBaseUrl ?? (authEnabled ? new URL(`http://127.0.0.1:${httpPort}`) : undefined),
+    httpHost,
+    httpPort,
+    codeGraphEnabled,
+    codeGraphCommand,
   };
 }
 
