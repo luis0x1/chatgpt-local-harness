@@ -35,6 +35,7 @@ export async function startAuthenticatedHttpServer(config: AppConfig): Promise<R
     clientSecret: config.googleClientSecret,
     callbackUrl,
     whitelist: config.authWhitelist,
+    ...(config.authDbPath ? { statePath: config.authDbPath } : {}),
     ...(config.oauthClientId
       ? {
           staticClient: {
@@ -97,6 +98,7 @@ export async function startAuthenticatedHttpServer(config: AppConfig): Promise<R
   return {
     async close() {
       await Promise.all([mcpServer.close(), closeHttpServer(httpServer)]);
+      provider.close();
     },
   };
 }

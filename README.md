@@ -81,7 +81,7 @@ The configured user-defined client coexists with Dynamic Client Registration. DC
 
 The harness acts as the OAuth authorization server for MCP clients. Google is used only to verify the end user's identity. A verified Google email must exactly match the case-insensitive whitelist before the harness approves the authorization request. The harness then issues its own one-hour access token and rotating refresh token; Google access tokens are not returned to MCP clients.
 
-OAuth client registrations, authorization state, access tokens, and refresh tokens are held in memory and are invalidated when the harness restarts. The `/mcp` endpoint requires a valid bearer token while OAuth discovery, registration, authorization, token, revocation, and Google callback endpoints remain reachable as required by the OAuth flow.
+Dynamic OAuth client registrations, pending authorization state, access tokens, and rotating refresh tokens are stored in SQLite and survive harness restarts. The database defaults to `~/.local/state/chatgpt-local-harness/oauth-<origin-hash>.sqlite`; set `LOCAL_HARNESS_AUTH_DB_PATH` to an absolute path to override it. Each public origin gets a separate default database. The file is created with owner-only permissions, and an existing file with broader permissions is rejected. Treat it as sensitive: registered OAuth client secrets are stored there, while harness tokens and state/code lookup keys are SHA-256 hashes. After upgrading from the former in-memory mode, clients must sign in once to populate the database. Node.js 22.13 or newer is required for the built-in SQLite module (which emits an experimental warning on Node 22). The `/mcp` endpoint requires a valid bearer token while OAuth discovery, registration, authorization, token, revocation, and Google callback endpoints remain reachable as required by the OAuth flow.
 
 ### Connect ChatGPT through Tailscale Funnel
 
@@ -275,6 +275,7 @@ There is a residual TOCTOU window between candidate enumeration and ripgrep open
 | `LOCAL_HARNESS_OAUTH_CLIENT_SECRET`  | empty               | Optional secret for the pre-registered OAuth client                |
 | `LOCAL_HARNESS_OAUTH_REDIRECT_URIS`  | empty               | Comma-separated exact redirect URIs for the pre-registered client  |
 | `LOCAL_HARNESS_AUTH_BASE_URL`        | loopback HTTP URL   | Public origin used for OAuth metadata and Google callback          |
+| `LOCAL_HARNESS_AUTH_DB_PATH`         | per-origin SQLite   | Optional absolute path to the private OAuth state database         |
 | `LOCAL_HARNESS_HTTP_HOST`            | `127.0.0.1`         | Bind host used in OAuth/HTTP mode                                  |
 | `LOCAL_HARNESS_HTTP_PORT`            | `3000`              | Bind port used in OAuth/HTTP mode                                  |
 | `LOCAL_HARNESS_CODE_GRAPH_ENABLED`   | `false`             | Re-expose selected code-review-graph tools through this MCP server |

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 
@@ -20,6 +21,7 @@ export interface AppConfig {
   oauthClientSecret: string | undefined;
   oauthRedirectUris: string[];
   authBaseUrl: URL | undefined;
+  authDbPath: string | undefined;
   httpHost: string;
   httpPort: number;
   codeGraphEnabled: boolean;
@@ -132,6 +134,23 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
   const configuredAuthBaseUrl = parseAuthBaseUrl(env.LOCAL_HARNESS_AUTH_BASE_URL);
   const httpHost = env.LOCAL_HARNESS_HTTP_HOST?.trim() || "127.0.0.1";
   const httpPort = positiveInteger(env, "LOCAL_HARNESS_HTTP_PORT", 3000);
+  const authBaseUrl =
+    configuredAuthBaseUrl ?? (authEnabled ? new URL(`http://127.0.0.1:${httpPort}`) : undefined);
+  const authDbOverride = env.LOCAL_HARNESS_AUTH_DB_PATH?.trim();
+  if (authDbOverride && !path.isAbsolute(authDbOverride)) {
+    throw new Error("LOCAL_HARNESS_AUTH_DB_PATH must be absolute");
+  }
+  const authDbPath =
+    authEnabled && authBaseUrl
+      ? (authDbOverride ??
+        path.join(
+          os.homedir(),
+          ".local",
+          "state",
+          "chatgpt-local-harness",
+          `oauth-${createHash("sha256").update(authBaseUrl.origin).digest("hex").slice(0, 16)}.sqlite`,
+        ))
+      : undefined;
   const codeGraphEnabled = boolean(env, "LOCAL_HARNESS_CODE_GRAPH_ENABLED");
   const codeGraphCommand = env.LOCAL_HARNESS_CODE_GRAPH_COMMAND?.trim() || "code-review-graph";
   if (httpPort > 65_535) throw new Error("LOCAL_HARNESS_HTTP_PORT must be at most 65535");
@@ -186,8 +205,8 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     oauthClientId,
     oauthClientSecret,
     oauthRedirectUris,
-    authBaseUrl:
-      configuredAuthBaseUrl ?? (authEnabled ? new URL(`http://127.0.0.1:${httpPort}`) : undefined),
+    authBaseUrl,
+    authDbPath,
     httpHost,
     httpPort,
     codeGraphEnabled,
