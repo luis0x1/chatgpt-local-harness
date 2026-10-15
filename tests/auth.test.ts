@@ -1,3 +1,6 @@
+import { mkdtemp, rm, stat } from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { OAuthClientInformationFull } from "@modelcontextprotocol/sdk/shared/auth.js";
 import { GoogleOAuthProvider } from "../src/auth/google-oauth-provider.js";
@@ -142,6 +145,114 @@ describe("GoogleOAuthProvider", () => {
   });
 });
 
+describe("SQLite OAuth state", () => {
+  it("keeps registrations, authorization state, and rotating tokens across restarts", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-oauth-"));
+    const statePath = path.join(dir, "oauth.sqlite");
+    const options = {
+      clientId: "google-client",
+      clientSecret: "google-secret",
+      callbackUrl: new URL("http://127.0.0.1:3000/oauth/google/callback"),
+      whitelist: ["allowed@example.com"],
+      fetchFn: googleFetch("allowed@example.com"),
+      statePath,
+    };
+    try {
+      const first = new GoogleOAuthProvider(options);
+      await first.clientsStore.registerClient!({
+        ...client,
+        client_id: "dynamic-client",
+        client_secret: "dynamic-secret",
+      } as never);
+      const redirect = await beginAuthorization(first);
+      first.close();
+
+      const second = new GoogleOAuthProvider(options);
+      expect(await second.clientsStore.getClient("dynamic-client")).toMatchObject({
+        client_id: "dynamic-client",
+        client_secret: "dynamic-secret",
+      });
+      const callback = new URL(
+        await second.completeGoogleAuthorization(
+          new URLSearchParams({ state: redirect.searchParams.get("state")!, code: "google-code" }),
+        ),
+      );
+      const code = callback.searchParams.get("code")!;
+      second.close();
+
+      const third = new GoogleOAuthProvider(options);
+      const tokens = await third.exchangeAuthorizationCode(
+        client,
+        code,
+        "verifier",
+        "http://client.example/callback",
+      );
+      third.close();
+
+      const fourth = new GoogleOAuthProvider(options);
+      expect((await fourth.verifyAccessToken(tokens.access_token)).extra?.email).toBe(
+        "allowed@example.com",
+      );
+      expect(() =>
+        fourth.exchangeRefreshToken(
+          { ...client, client_id: "wrong-client" },
+          tokens.refresh_token!,
+        ),
+      ).toThrow("invalid or expired");
+      const rotated = await fourth.exchangeRefreshToken(client, tokens.refresh_token!);
+      fourth.close();
+
+      const fifth = new GoogleOAuthProvider(options);
+      expect(() => fifth.exchangeRefreshToken(client, tokens.refresh_token!)).toThrow(
+        "invalid or expired",
+      );
+      expect((await fifth.verifyAccessToken(rotated.access_token)).clientId).toBe(client.client_id);
+      fifth.close();
+      if (process.platform !== "win32") {
+        expect((await stat(statePath)).mode & 0o077).toBe(0);
+      }
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not accept persisted tokens after their email is removed from the whitelist", async () => {
+    const dir = await mkdtemp(path.join(os.tmpdir(), "harness-oauth-"));
+    const statePath = path.join(dir, "oauth.sqlite");
+    const options = {
+      clientId: "google-client",
+      clientSecret: "google-secret",
+      callbackUrl: new URL("http://127.0.0.1:3000/oauth/google/callback"),
+      whitelist: ["allowed@example.com"],
+      fetchFn: googleFetch("allowed@example.com"),
+      statePath,
+    };
+    try {
+      const first = new GoogleOAuthProvider(options);
+      const redirect = await beginAuthorization(first);
+      const callback = new URL(
+        await first.completeGoogleAuthorization(
+          new URLSearchParams({ state: redirect.searchParams.get("state")!, code: "google-code" }),
+        ),
+      );
+      const tokens = await first.exchangeAuthorizationCode(
+        client,
+        callback.searchParams.get("code")!,
+        "verifier",
+      );
+      first.close();
+      const second = new GoogleOAuthProvider({ ...options, whitelist: [] });
+      expect(() => second.verifyAccessToken(tokens.access_token)).toThrow("invalid or expired");
+      expect(() => second.exchangeRefreshToken(client, tokens.refresh_token!)).toThrow(
+        "invalid or expired",
+      );
+      second.close();
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("authentication configuration", () => {
   const baseEnv = { LOCAL_HARNESS_ROOTS: '["/tmp/project"]' };
 
@@ -186,6 +297,7 @@ describe("authentication configuration", () => {
     expect(config.authEnabled).toBe(true);
     expect(config.authWhitelist).toEqual(["one@example.com", "two@example.com"]);
     expect(config.authBaseUrl?.toString()).toBe("https://harness.example/");
+    expect(config.authDbPath?.endsWith(".sqlite")).toBe(true);
     expect(config.httpHost).toBe("0.0.0.0");
     expect(config.httpPort).toBe(8080);
   });
